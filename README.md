@@ -139,6 +139,10 @@ The vision-analysis stage should evaluate motion as well as appearance. A single
 show a reveal, gesture, camera move, or developing action, so video-capable analysis is preferred.
 When only image input is available, use multiple ordered frames from each candidate.
 
+See [Local model analysis](docs/local-model-analysis.md) for the recommended Apple Silicon model,
+installation instructions, output schema, and division of work between the vision model and
+deterministic computer-vision checks.
+
 ## Development
 
 ```bash
