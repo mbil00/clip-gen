@@ -96,6 +96,29 @@
   .description .meta { margin-top: 8px; font-size: 11px; }
   .description.pending p, .description.running p { color: var(--muted); }
   .description.error p { color: var(--error); }
+  .segmented { display: flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+  .segmented button {
+    background: none; color: var(--muted); border: 0; border-radius: 0;
+    padding: 6px 14px; font: inherit; font-size: 13px; cursor: pointer;
+  }
+  .segmented button.active { background: var(--panel-2); color: var(--text); }
+  .segmented button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .table-wrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  thead th {
+    position: sticky; top: 0; z-index: 1; background: var(--panel);
+    text-align: left; font-weight: 600; color: var(--muted); font-size: 12px;
+    padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap;
+  }
+  tbody td { padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tbody tr.picked { background: rgba(224, 160, 92, .05); }
+  td.num, th.num { font-family: var(--mono); text-align: right; white-space: nowrap; }
+  td.shot-id { font-family: var(--mono); color: var(--accent); white-space: nowrap; }
+  td.times { font-family: var(--mono); color: var(--muted); font-size: 11px; }
+  td.text { min-width: 280px; line-height: 1.45; }
+  td.text[data-status="pending"], td.text[data-status="running"] { color: var(--muted); }
+  td.text[data-status="error"] { color: var(--error); }
+  tbody input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; margin: 0; }
   .shot-id { font-family: var(--mono); font-size: 13px; color: var(--accent); }
   .frames { display: flex; gap: 10px; flex-wrap: wrap; }
   .frame { width: 168px; }
@@ -166,6 +189,17 @@
       <button id="select-all" class="link-button" type="button">Select all</button>
       <button id="select-none" class="link-button" type="button">Clear</button>
       <span class="spacer"></span>
+      <div class="segmented" role="group" aria-label="View">
+        <button type="button" data-view="cards" class="active">Cards</button>
+        <button type="button" data-view="table">Table</button>
+      </div>
+    </div>
+    <div class="toolbar">
+      <span id="copy-label" class="meta"></span>
+      <button class="link-button" type="button" data-copy="tsv">TSV</button>
+      <button class="link-button" type="button" data-copy="markdown">Markdown</button>
+      <button class="link-button" type="button" data-copy="json">JSON</button>
+      <span class="spacer"></span>
       <span id="model-status" class="meta"></span>
     </div>
     <div id="shot-list"></div>
@@ -184,6 +218,8 @@ const shotList = document.getElementById("shot-list");
 const describeButton = document.getElementById("describe");
 const modelStatus = document.getElementById("model-status");
 let current = null;
+let view = "cards";
+const picked = new Set();
 
 const timecode = (seconds) => {
   const minutes = Math.floor(seconds / 60);
@@ -245,7 +281,26 @@ function render(jobId, job) {
   summary.classList.remove("hidden");
 
   current = { jobId, job };
-  shotList.innerHTML = manifest.shots.map((shot) => `
+  picked.clear();
+  renderShots();
+  shotsEl.classList.remove("hidden");
+  checkModel();
+  syncButtons();
+}
+
+function renderShots() {
+  shotList.innerHTML = view === "cards" ? cardsView() : tableView();
+  shotList.querySelectorAll("input[type=checkbox]").forEach((box) => {
+    box.checked = picked.has(box.value);
+    box.closest(".shot, tr").classList.toggle("picked", box.checked);
+  });
+  renderDescriptions();
+}
+
+function cardsView() {
+  const { jobId, job } = current;
+  const fileUrl = (path) => `/jobs/${jobId}/files/${path}`;
+  return job.manifest.shots.map((shot) => `
     <div class="shot" id="row-${shot.id}">
       <div class="shot-head">
         <input type="checkbox" value="${shot.id}" aria-label="Select ${shot.id}">
@@ -261,35 +316,144 @@ function render(jobId, job) {
           </a>`).join("")}
         ${job.settings.render_clips ? `<video src="${fileUrl(`clips/${shot.id}.mp4`)}" controls preload="none"></video>` : ""}
       </div>
-      <div class="description hidden"></div>
+      <div class="description hidden" data-description="${shot.id}"></div>
     </div>`).join("");
-  shotsEl.classList.remove("hidden");
-  renderDescriptions(job.descriptions || {});
-  checkModel();
 }
 
-const selected = () => [...shotList.querySelectorAll("input:checked")].map((box) => box.value);
+function tableView() {
+  const { jobId, job } = current;
+  const clips = job.settings.render_clips;
+  const head = ["", "shot", "start", "end", "dur", "fr", "frame times", "description"]
+    .concat(clips ? ["clip"] : []);
+  const body = job.manifest.shots.map((shot) => `
+    <tr id="row-${shot.id}">
+      <td><input type="checkbox" value="${shot.id}" aria-label="Select ${shot.id}"></td>
+      <td class="shot-id">${shot.id}</td>
+      <td class="num">${timecode(shot.start)}</td>
+      <td class="num">${timecode(shot.end)}</td>
+      <td class="num">${(shot.end - shot.start).toFixed(2)}s</td>
+      <td class="num">${shot.samples.length}</td>
+      <td class="times">${shot.samples.map((sample) => sample.timestamp.toFixed(2)).join("<br>")}</td>
+      <td class="text" data-description="${shot.id}"></td>
+      ${clips ? `<td><a href="/jobs/${jobId}/files/clips/${shot.id}.mp4" target="_blank" rel="noreferrer">${shot.id}.mp4</a></td>` : ""}
+    </tr>`).join("");
+  return `<div class="table-wrap"><table>
+    <thead><tr>${head.map((label, index) => `<th${index > 1 && index < 6 ? ' class="num"' : ""}>${label}</th>`).join("")}</tr></thead>
+    <tbody>${body}</tbody>
+  </table></div>`;
+}
+
+const selected = () =>
+  (current ? current.job.manifest.shots : []).map((shot) => shot.id).filter((id) => picked.has(id));
+
+function shotRows() {
+  const chosen = picked.size ? selected() : current.job.manifest.shots.map((shot) => shot.id);
+  const descriptions = current.job.descriptions || {};
+  return current.job.manifest.shots
+    .filter((shot) => chosen.includes(shot.id))
+    .map((shot) => ({
+      id: shot.id,
+      start: Number(shot.start.toFixed(2)),
+      end: Number(shot.end.toFixed(2)),
+      duration: Number((shot.end - shot.start).toFixed(2)),
+      frames: shot.samples.map((sample) => Number(sample.timestamp.toFixed(2))),
+      description: (descriptions[shot.id] || {}).text || "",
+      ...(current.job.settings.render_clips ? { clip: `clips/${shot.id}.mp4` } : {}),
+    }));
+}
+
+const COLUMNS = ["shot", "start", "end", "duration", "frames", "frame_timestamps", "description"];
+const flat = (row) => [
+  row.id, row.start, row.end, row.duration, row.frames.length,
+  row.frames.join(" "), row.description.replace(/\s+/g, " ").trim(),
+];
+
+const FORMATS = {
+  tsv: (rows) => [
+    [...COLUMNS, ...(rows[0] && rows[0].clip ? ["clip"] : [])].join("\t"),
+    ...rows.map((row) => [...flat(row), ...(row.clip ? [row.clip] : [])].join("\t")),
+  ].join("\n"),
+  markdown: (rows) => {
+    const header = [...COLUMNS, ...(rows[0] && rows[0].clip ? ["clip"] : [])];
+    const cells = rows.map((row) =>
+      [...flat(row), ...(row.clip ? [row.clip] : [])].map((value) => String(value).replace(/\|/g, "\\|")));
+    return [
+      `| ${header.join(" | ")} |`,
+      `| ${header.map(() => "---").join(" | ")} |`,
+      ...cells.map((row) => `| ${row.join(" | ")} |`),
+    ].join("\n");
+  },
+  json: (rows) => JSON.stringify(rows, null, 2),
+};
+
+document.querySelectorAll("[data-copy]").forEach((button) => {
+  button.addEventListener("click", async () => {
+    if (!current) return;
+    const rows = shotRows();
+    if (!rows.length) return;
+    const text = FORMATS[button.dataset.copy](rows);
+    const label = button.textContent;
+    button.textContent = (await copyText(text)) ? "Copied" : "Copy failed";
+    setTimeout(() => { button.textContent = label; }, 1200);
+  });
+});
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    // Clipboard API needs a secure context; fall back for plain-HTTP hosts.
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.appendChild(area);
+    area.select();
+    const copied = document.execCommand("copy");
+    area.remove();
+    return copied;
+  }
+}
+
+document.querySelectorAll("[data-view]").forEach((button) => {
+  button.addEventListener("click", () => {
+    view = button.dataset.view;
+    document.querySelectorAll("[data-view]").forEach((other) =>
+      other.classList.toggle("active", other.dataset.view === view));
+    renderShots();
+  });
+});
 
 shotList.addEventListener("change", (event) => {
-  event.target.closest(".shot").classList.toggle("picked", event.target.checked);
-  syncButton();
+  const box = event.target;
+  if (box.type !== "checkbox") return;
+  if (box.checked) picked.add(box.value); else picked.delete(box.value);
+  box.closest(".shot, tr").classList.toggle("picked", box.checked);
+  syncButtons();
 });
 
 document.getElementById("select-all").addEventListener("click", () => setAll(true));
 document.getElementById("select-none").addEventListener("click", () => setAll(false));
 
 function setAll(checked) {
+  picked.clear();
+  if (checked && current) current.job.manifest.shots.forEach((shot) => picked.add(shot.id));
   shotList.querySelectorAll("input[type=checkbox]").forEach((box) => {
     box.checked = checked;
-    box.closest(".shot").classList.toggle("picked", checked);
+    box.closest(".shot, tr").classList.toggle("picked", checked);
   });
-  syncButton();
+  syncButtons();
 }
 
-function syncButton() {
-  const count = selected().length;
+function syncButtons() {
+  const count = picked.size;
   describeButton.disabled = count === 0 || describeButton.dataset.busy === "true";
   describeButton.textContent = count ? `Describe ${count} scene${count > 1 ? "s" : ""}` : "Describe selected";
+  const total = current ? current.job.manifest.shots.length : 0;
+  document.getElementById("copy-label").textContent = count
+    ? `Copy ${count} selected shot${count > 1 ? "s" : ""}:`
+    : `Copy all ${total} shot${total === 1 ? "" : "s"}:`;
 }
 
 async function checkModel() {
@@ -307,7 +471,7 @@ describeButton.addEventListener("click", async () => {
   const shotIds = selected();
   if (!shotIds.length || !current) return;
   describeButton.dataset.busy = "true";
-  syncButton();
+  syncButtons();
   try {
     const response = await fetch(`/api/jobs/${current.jobId}/describe`, {
       method: "POST",
@@ -315,41 +479,45 @@ describeButton.addEventListener("click", async () => {
       body: JSON.stringify({ shot_ids: shotIds }),
     });
     if (!response.ok) throw new Error((await response.json()).detail || `Request failed (${response.status})`);
-    renderDescriptions((await response.json()).descriptions);
+    current.job.descriptions = (await response.json()).descriptions;
+    renderDescriptions();
     pollDescriptions();
   } catch (error) {
     describeButton.dataset.busy = "false";
-    syncButton();
+    syncButtons();
     alert(error.message);
   }
 });
 
 async function pollDescriptions() {
   const job = await (await fetch(`/api/jobs/${current.jobId}`)).json();
-  const descriptions = job.descriptions || {};
-  renderDescriptions(descriptions);
-  const busy = Object.values(descriptions).some((d) => d.status === "pending" || d.status === "running");
+  current.job.descriptions = job.descriptions || {};
+  renderDescriptions();
+  const busy = Object.values(current.job.descriptions)
+    .some((entry) => entry.status === "pending" || entry.status === "running");
   if (busy) return setTimeout(pollDescriptions, 1500);
   describeButton.dataset.busy = "false";
-  syncButton();
+  syncButtons();
 }
 
-function renderDescriptions(descriptions) {
-  Object.values(descriptions).forEach((entry) => {
-    const row = document.getElementById(`row-${entry.shot_id}`);
-    if (!row) return;
-    const box = row.querySelector(".description");
-    box.className = `description ${entry.status}`;
-    const body = {
-      pending: "Queued for the model…",
-      running: "Describing…",
-      error: entry.error,
-    }[entry.status] ?? entry.text;
-    box.innerHTML = `<p></p>${entry.status === "done" && entry.model ? `<div class="meta"></div>` : ""}`;
-    box.querySelector("p").textContent = body;
-    if (entry.status === "done" && entry.model) {
-      box.querySelector(".meta").textContent = entry.model.split("/").pop();
-    }
+const BUSY_TEXT = { pending: "Queued for the model\u2026", running: "Describing\u2026" };
+
+function renderDescriptions() {
+  Object.values(current.job.descriptions || {}).forEach((entry) => {
+    const body = BUSY_TEXT[entry.status] ?? (entry.status === "error" ? entry.error : entry.text);
+    document.querySelectorAll(`[data-description="${entry.shot_id}"]`).forEach((box) => {
+      box.dataset.status = entry.status;
+      if (box.tagName === "TD") {
+        box.textContent = body;
+        return;
+      }
+      box.className = `description ${entry.status}`;
+      box.innerHTML = `<p></p>${entry.status === "done" && entry.model ? `<div class="meta"></div>` : ""}`;
+      box.querySelector("p").textContent = body;
+      if (entry.status === "done" && entry.model) {
+        box.querySelector(".meta").textContent = entry.model.split("/").pop();
+      }
+    });
   });
 }
 </script>

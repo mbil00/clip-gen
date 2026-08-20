@@ -119,6 +119,25 @@ Descriptions are free text at this stage. The structured analysis record in
 [Local model analysis](docs/local-model-analysis.md) is the intended next step, and is what later
 selection passes should consume.
 
+### Table view and copying
+
+The shot list has two views. **Cards** is the thumbnail view used for reviewing footage; **Table**
+puts every shot on one row with its id, start, end, duration, frame count, frame timestamps,
+description, and clip file when one was rendered. Selection is shared, so shots can be picked
+visually in the cards view and then copied from the table.
+
+Three copy buttons put the same rows on the clipboard in different shapes:
+
+| Format | Use |
+| --- | --- |
+| TSV | Pastes as a real table into Sheets, Excel, or Notion. |
+| Markdown | Pastes into a chat with a reasoning model, or into a document or issue. |
+| JSON | One object per shot, when the next stage is code. |
+
+Copying acts on the selected shots, or on every shot when nothing is selected; the label next to the
+buttons says which. Descriptions are flattened to a single line so that a pasted row cannot break
+across lines.
+
 ### HTTP endpoints
 
 The UI is a thin client over a small JSON API, which is also convenient for scripting:
