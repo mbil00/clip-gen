@@ -9,6 +9,13 @@ dependencies = [
     "scenedetect>=0.7,<0.8",
 ]
 
+[project.optional-dependencies]
+web = [
+    "fastapi>=0.115,<1",
+    "python-multipart>=0.0.9,<1",
+    "uvicorn>=0.30,<1",
+]
+
 [project.scripts]
 clip-gen = "clip_gen.cli:main"
 

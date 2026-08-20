@@ -9,3 +9,6 @@ build/
 
 # Generated media and analysis output
 clip-gen-output/
+
+# Local model configuration
+.env

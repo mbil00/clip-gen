@@ -47,6 +47,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     split_parser.add_argument("--overwrite", action="store_true")
 
+    serve_parser = subparsers.add_parser(
+        "serve", help="Run the web UI for uploading and preparing videos."
+    )
+    serve_parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("clip-gen-output/web"),
+        help="Directory holding one folder per upload.",
+    )
+    serve_parser.add_argument("--host", default="127.0.0.1")
+    serve_parser.add_argument("--port", type=int, default=8000)
+
     return parser
 
 
@@ -93,6 +105,17 @@ def main(argv: list[str] | None = None) -> int:
                 f"Prepared {len(manifest.shots)} shots with frame samples; "
                 f"wrote {manifest_path}"
             )
+            return 0
+
+        if args.command == "serve":
+            try:
+                from .web import serve
+            except ImportError as error:
+                raise RuntimeError(
+                    "The web UI needs extra packages. Install them with: uv sync --extra web"
+                ) from error
+            print(f"clip-gen UI on http://{args.host}:{args.port}")
+            serve(output_dir=args.output_dir, host=args.host, port=args.port)
             return 0
 
         if args.command == "split":
